@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { sendMessage, normalizePhone } from './api.js';
+import { sendMessage, sendMessageByChatId, normalizePhone } from './api.js';
 import { load, save } from './storage.js';
 
 const LS_KEYS = {
   phones: 'bale.phones',
+  chatIds: 'bale.chatIds',
   botId: 'bale.botId',
+  botToken: 'bale.botToken',
   apiKey: 'bale.apiKey',
   lastText: 'bale.lastText'
 };
@@ -26,11 +28,15 @@ function maskKey(value) {
 export default function App() {
   const defaultBot = import.meta.env.VITE_DEFAULT_BOT_ID || '';
   const [botId, setBotId] = useLocalStorageState(LS_KEYS.botId, defaultBot);
+  const [botToken, setBotToken] = useLocalStorageState(LS_KEYS.botToken, '');
   const [apiKey, setApiKey] = useLocalStorageState(LS_KEYS.apiKey, '');
   const [phones, setPhones] = useLocalStorageState(LS_KEYS.phones, []);
+  const [chatIds, setChatIds] = useLocalStorageState(LS_KEYS.chatIds, []);
   const [message, setMessage] = useLocalStorageState(LS_KEYS.lastText, '');
   const [newPhone, setNewPhone] = useState('');
+  const [newChatId, setNewChatId] = useState('');
   const [selected, setSelected] = useState({});
+  const [selectedChats, setSelectedChats] = useState({});
   const [sending, setSending] = useState(false);
   const [logs, setLogs] = useState([]);
   const [configOpen, setConfigOpen] = useState(false);
@@ -49,6 +55,7 @@ export default function App() {
 
   const trimmedBot = String(botId || '').trim();
   const trimmedKey = apiKey.trim();
+  const trimmedToken = botToken.trim();
   const trimmedMessage = message.trim();
 
   const addLog = (line) => setLogs((l) => [...l, line]);
@@ -65,19 +72,43 @@ export default function App() {
     setNewPhone('');
   };
 
+  const addChatId = () => {
+    const trimmed = newChatId.trim();
+    if (!trimmed) return;
+    if (chatIds.includes(trimmed)) {
+      setNewChatId('');
+      return;
+    }
+    setChatIds([...chatIds, trimmed]);
+    setNewChatId('');
+  };
+
   const removePhone = (p) => {
     setPhones(phones.filter((x) => x !== p));
     setSelected((s) => { const n = { ...s }; delete n[p]; return n; });
   };
 
+  const removeChatId = (id) => {
+    setChatIds(chatIds.filter((x) => x !== id));
+    setSelectedChats((s) => { const next = { ...s }; delete next[id]; return next; });
+  };
+
   const toggleSelect = (p) => setSelected((s) => ({ ...s, [p]: !s[p] }));
+
+  const toggleChatSelect = (id) => setSelectedChats((s) => ({ ...s, [id]: !s[id] }));
 
   const selectedPhones = useMemo(
     () => phones.filter((p) => selected[p]),
     [phones, selected]
   );
 
+  const selectedChatTargets = useMemo(
+    () => chatIds.filter((id) => selectedChats[id]),
+    [chatIds, selectedChats]
+  );
+
   const canSend = Boolean(trimmedBot && trimmedKey && trimmedMessage && phones.length > 0);
+  const canSendByChat = Boolean(trimmedToken && trimmedMessage && chatIds.length > 0);
 
   const doSend = async (targets) => {
     if (!canSend || sending) return;
@@ -109,10 +140,40 @@ export default function App() {
     }
   };
 
+  const doSendByChat = async (targets) => {
+    if (!canSendByChat || sending) return;
+    const list = targets.length ? targets : chatIds;
+    setSending(true);
+    clearLogs();
+    addLog(`در حال ارسال برای ${list.length} شناسه...`);
+
+    try {
+      const results = await Promise.allSettled(
+        list.map((id) => sendMessageByChatId({
+          botToken: trimmedToken,
+          chatId: id,
+          text: trimmedMessage
+        }))
+      );
+
+      results.forEach((r, idx) => {
+        const id = list[idx];
+        if (r.status === 'fulfilled') {
+          addLog(`✓ ${id}: ارسال شد`);
+        } else {
+          addLog(`✗ ${id}: ${r.reason?.message || 'ناموفق'}`);
+        }
+      });
+    } finally {
+      setSending(false);
+    }
+  };
+
   const openConfig = () => setConfigOpen(true);
   const commitConfig = () => {
     setBotId(trimmedBot);
     setApiKey(trimmedKey);
+    setBotToken(trimmedToken);
     setConfigOpen(false);
   };
 
@@ -131,6 +192,9 @@ export default function App() {
               </span>
               <span className={`status ${trimmedKey ? 'good' : 'bad'}`}>
                 کلید API: {maskKey(trimmedKey)}
+              </span>
+              <span className={`status ${trimmedToken ? 'good' : 'bad'}`}>
+                توکن ربات: {maskKey(trimmedToken)}
               </span>
             </div>
           </div>
@@ -225,6 +289,67 @@ export default function App() {
               ))}
             </div>
           </div>
+          <div className="panel" style={{ marginTop: 16 }}>
+            <div className="title">آیدی‌های گفتگو (chat_id)</div>
+            <div className="row" style={{ gap: 8 }}>
+              <div style={{ flex: '1 1 auto' }}>
+                <label>آیدی جدید</label>
+                <input
+                  dir="ltr"
+                  placeholder="@channel یا شناسه عددی"
+                  value={newChatId}
+                  onChange={(e) => setNewChatId(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') addChatId(); }}
+                />
+              </div>
+              <div>
+                <label>&nbsp;</label>
+                <button onClick={addChatId}>افزودن</button>
+              </div>
+            </div>
+
+            {!trimmedToken && (
+              <div className="bad" style={{ fontSize: 12, marginTop: 8 }}>
+                برای ارسال با آیدی لازم است توکن Bot API را در تنظیمات وارد کنید.
+              </div>
+            )}
+
+            <div className="phones" style={{ marginTop: 10 }}>
+              {chatIds.length === 0 && <div className="muted">هنوز آیدی‌ای اضافه نشده است.</div>}
+              {chatIds.map((id) => (
+                <div key={id} className="phone-item">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={!!selectedChats[id]}
+                      onChange={() => toggleChatSelect(id)}
+                    />
+                    <span dir="ltr">{id}</span>
+                  </label>
+                  <div className="phone-actions">
+                    <button className="ghost" onClick={() => navigator.clipboard?.writeText(id)}>کپی</button>
+                    <button className="danger" onClick={() => removeChatId(id)}>حذف</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+              <button
+                className="primary"
+                disabled={!canSendByChat || sending}
+                onClick={() => doSendByChat([])}
+              >
+                {sending ? 'در حال ارسال…' : 'ارسال با آیدی برای همه'}
+              </button>
+              <button
+                disabled={!canSendByChat || sending || selectedChatTargets.length === 0}
+                onClick={() => doSendByChat(selectedChatTargets)}
+              >
+                {sending ? 'در حال ارسال…' : `ارسال با آیدی برای انتخاب‌شده‌ها (${selectedChatTargets.length})`}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -263,12 +388,23 @@ export default function App() {
               />
             </div>
 
+            <div>
+              <label>توکن Bot API</label>
+              <input
+                type="password"
+                placeholder="برای ارسال با آیدی مورد نیاز است"
+                value={botToken}
+                onChange={(e) => setBotToken(e.target.value)}
+              />
+            </div>
+
             <div className="modal-actions">
               <button className="primary" onClick={commitConfig} disabled={!trimmedBot || !apiKey.trim()}>
                 ذخیره و بستن
               </button>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="ghost" onClick={() => setApiKey('')}>حذف کلید</button>
+                <button className="ghost" onClick={() => setBotToken('')}>حذف توکن</button>
                 <button className="ghost" onClick={() => setConfigOpen(false)}>انصراف</button>
               </div>
             </div>

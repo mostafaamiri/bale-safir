@@ -33,6 +33,32 @@ export async function sendMessage({ botId, phoneNumber, text, apiKey }) {
   return data;
 }
 
+export async function sendMessageByChatId({ botToken, chatId, text }) {
+  const trimmedToken = String(botToken || '').trim();
+  if (!trimmedToken) throw new Error('Bot token is required');
+
+  const trimmedChatId = String(chatId || '').trim();
+  if (!trimmedChatId) throw new Error('chat_id is required');
+
+  const params = new URLSearchParams();
+  params.set('chat_id', trimmedChatId);
+  params.set('text', text);
+
+  const url = `https://tapi.bale.ai/bot${trimmedToken}/sendMessage?${params.toString()}`;
+
+  const res = await fetch(url, { method: 'GET' });
+
+  let data = null;
+  try { data = await res.json(); } catch { /* ignore non-JSON */ }
+
+  if (!res.ok) {
+    const reason = data?.description || data?.error || res.statusText || 'Request failed';
+    throw new Error(typeof reason === 'string' ? reason : JSON.stringify(reason));
+  }
+
+  return data;
+}
+
 export function normalizePhone(input) {
   const digits = String(input).replace(/[^0-9]/g, '');
   if (!digits) return '';

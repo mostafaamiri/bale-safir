@@ -34,6 +34,7 @@ The app supports two modes:
 - Add one or more phone numbers (e.g., `98912xxxxxxx` or `0912xxxxxxx`).
   - Inputs are normalized to `98` prefix when possible.
 - Type your message, then click `Send to all` or select specific numbers and click `Send to selected`.
+- To send by `chat_id`, add your Bot API token in **Config**, register one or more `chat_id` (numeric or `@channel`) entries, then use the dedicated send buttons in the Chat IDs panel.
 - Delivery results appear in the log at the bottom.
 - The UI ships in Persian (RTL). Update the strings in `src/App.jsx` if you need another language.
 
